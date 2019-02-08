@@ -42,6 +42,36 @@ using namespace std;
 
 typedef int (*fptr)(void);
 
+struct CartesianDictionary {
+	float X;
+    bool xset;
+	float Y;
+    bool yset;
+	float Z;
+    bool zset;
+	float ThetaX;
+    bool thetaxset;
+	float ThetaY;
+    bool thetayset;
+	float ThetaZ;
+    bool thetazset;
+
+	void InitStruct() {
+		X = 0.0f;
+		xset = false;
+		Y = 0.0f;
+		yset = false;
+		Z = 0.0f;
+		zset = false;
+		ThetaX = 0.0f;
+		thetaxset = false;
+		ThetaY = 0.0f;
+		thetayset = false;
+		ThetaZ = 0.0f;
+		thetazset = false;
+	}
+};
+
 class Jaco2 {
 
     public:
@@ -53,56 +83,49 @@ class Jaco2 {
         static const short TORQUE_KP[6];
 
         CartesianPosition currentCommand;
+        AngularPosition currentAngularCommand;
+
         // misc variables
-        int current_motor;
         int delay;
         vector<string> error_message;
-        int updated[6]; // for switching to torque mode
-        int updated2[6]; // for switching to position mode
-        int updated_hand[3];
         string datetime;
         int display_error_level;
         vector<string> types;
         int file_limit;
         string log_save_location;
-
-        // read variables
-        float pos[6]; // from Halls sensor
-        float pos_finger[3];
-        float pos_rad[6];
-        float torque_load[6];
-        float vel[6];
-
-        // torque variables
-
-        // variables used during the communication process.
-        int packets_read;
-        int packets_sent;
-        int read_count;
-        int write_count;
-        float target_angle[6];
         int ctr;  // counter for printing occasionally
 
         // function pointers to Kinova API
         int (*MyInitAPI)();
         int (*MyCloseAPI)();
+        int (*MyStopControlAPI)();
         int (*MyMoveHome)();
         int (*MyInitFingers)();
         int (*MyGetDevices)(KinovaDevice[], int&);
         int (*MySetActiveDevice)(KinovaDevice);
         int (*MySendBasicTrajectory)(TrajectoryPoint);
-        int (*MyGetQuickStatus)(QuickStatus&);
         int (*MyGetCartesianCommand)(CartesianPosition&);
-
+        int (*MySetFrameType)(int);
+        int (*MyEraseAllTrajectories)();
+        int (*MyGetAngularCommand)(AngularPosition &);
+        int (*MyGetQuickStatus)(QuickStatus &Response);
+        int (*MyGetGeneralInformations)(GeneralInformations &);
 
         // main functions
         void Connect();
-        void Move();
-        CartesianInfo GetPosition();
-        void MoveToPos(CartesianInfo position);
         void Disconnect();
+        void ResetInstr();
+        void SetFrameType(int type);
+
         void Home();
-        void InitPositionMode();
+        CartesianInfo GetPosition();
+        AngularInfo GetAngularPosition();
+
+        void Move(CartesianDictionary position);
+        void MoveToPos(CartesianInfo position);
+
+        void PrintQuickStatus();
+        void PrintGeneralInfo();
         int log_msg(int type, string msg);
 
         Jaco2(int a_display_error_level); //constructor

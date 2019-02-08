@@ -12,14 +12,14 @@ const short Jaco2::TORQUE_KP[6] = {1000, 1500, 1000, 1750, 1750, 1750};
 Jaco2::Jaco2(int a_display_error_level) {
 
     CartesianPosition currentCommand;
+    AngularPosition currentAngularCommand;
+
     // get current date and time for error logging
     time_t rawtime;
     struct tm * timeinfo;
     char buffer[80];
-
     time (&rawtime);
     timeinfo = localtime(&rawtime);
-
     strftime(buffer,sizeof(buffer),"%d-%m-%Y %I:%M:%S",timeinfo);
     string currentdatetime(buffer);
     datetime = currentdatetime;
@@ -37,29 +37,11 @@ Jaco2::Jaco2(int a_display_error_level) {
 
     ctr = 0;
     //set common variables
-    delay = 1250;
-    packets_sent = 6;
-    packets_read = 18; //3 responses (14, 15, 16) expected per motor
-    current_motor = 6; // only 6 joints so if source address is not < 6 after
-                      // reading should receive error due do array size
     display_error_level = a_display_error_level;
     types.push_back("DEBUG");
     types.push_back("INFO");
     types.push_back("WARNING");
     types.push_back("ERROR");
-
-    // get the current date and time
-    // TODO: get date and time with ctime for first line of log and name of
-    // file
-
-    memset(updated, 0, (size_t)sizeof(int)*6);
-    memset(updated_hand, 0, (size_t)sizeof(int)*3);
-    memset(pos_finger, 0.0, (size_t)sizeof(float)*3);
-
-    write_count = 0;
-    read_count = 0;
-    unsigned short d = 0x00;
-
 }
 
 Jaco2::~Jaco2() { }
@@ -69,6 +51,7 @@ void Jaco2::Connect() {
 
 	//We load the functions from the library (Under Windows, use GetProcAddress)
 	MyInitAPI = (int (*)()) dlsym(commandLayer_handle,"InitAPI");
+    MyStopControlAPI = (int (*)()) dlsym(commandLayer_handle,"StopControlAPI");
 	MyCloseAPI = (int (*)()) dlsym(commandLayer_handle,"CloseAPI");
 	MyMoveHome = (int (*)()) dlsym(commandLayer_handle,"MoveHome");
 	MyInitFingers = (int (*)()) dlsym(commandLayer_handle,"InitFingers");
@@ -77,6 +60,11 @@ void Jaco2::Connect() {
 	MySendBasicTrajectory = (int (*)(TrajectoryPoint)) dlsym(commandLayer_handle,"SendBasicTrajectory");
 	MyGetQuickStatus = (int (*)(QuickStatus &)) dlsym(commandLayer_handle,"GetQuickStatus");
 	MyGetCartesianCommand = (int (*)(CartesianPosition &)) dlsym(commandLayer_handle,"GetCartesianCommand");
+    MySetFrameType = (int (*)(int)) dlsym(commandLayer_handle,"SetFrameType");
+    MyEraseAllTrajectories = (int (*)()) dlsym(commandLayer_handle,"EraseAllTrajectories");
+    MyGetAngularCommand = (int(*)(AngularPosition &)) dlsym(commandLayer_handle, "GetAngularCommand");
+    MyGetQuickStatus = (int (*)(QuickStatus &)) dlsym(commandLayer_handle,"GetQuickStatus");
+    MyGetGeneralInformations = (int (*)(GeneralInformations &)) dlsym(commandLayer_handle,"GetGeneralInformations");
 
 	if((MyInitAPI == NULL) || (MyCloseAPI == NULL) ||
 	   (MyGetQuickStatus == NULL) || (MySendBasicTrajectory == NULL) ||
@@ -122,34 +110,116 @@ CartesianInfo Jaco2::GetPosition() {
     return cartesianPosition;
 }
 
+void Jaco2::PrintQuickStatus() {
+    QuickStatus status;
+    (*MyGetQuickStatus)(status);
+    printf( "RobotType: %02x\n"
+            "RetractType: %02x\n"
+            "ControlEnableStatus: %02x\n"
+            "ControlFrameType: %02x\n"
+            "ControlActiveModule: %02x\n"
+            "CartesianFaultState: %02x\n"
+            "ForceControlStatus: %02x\n"
+            "CurrentLimitationStatus: %02x\n"
+            "TorqueSensorsStatus: %02x\n",
+        (unsigned char) status.RobotType,
+        (unsigned char) status.RetractType,
+        (unsigned char) status.ControlEnableStatus,
+        (unsigned char) status.ControlFrameType,
+        (unsigned char) status.ControlActiveModule,
+        (unsigned char) status.CartesianFaultState,
+        (unsigned char) status.ForceControlStatus,
+        (unsigned char) status.CurrentLimitationStatus,
+        (unsigned char) status.TorqueSensorsStatus);
+}
+
+void Jaco2::PrintGeneralInfo() {
+    GeneralInformations info;
+    (*MyGetGeneralInformations)(info);
+    printf( "TimeFromStartup: %f\n"
+            "TotalCurrent: %f\n"
+            "Power: %f\n"
+            "AveragePower: %f\n"
+            "AccelerationX: %f\n"
+            "AccelerationY: %f\n"
+            "AccelerationZ: %f\n"
+            "CodeVersion: %u\n"
+            "Controller: %u\n",
+            "ConnectedActuatorCount: %u\n",
+            "PositionType: %u\n",
+        (unsigned char) info.TimeFromStartup,
+        (unsigned char) info.TotalCurrent,
+        (unsigned char) info.Power,
+        (unsigned char) info.AveragePower,
+        (unsigned char) info.AccelerationX,
+        (unsigned char) info.AccelerationY,
+        (unsigned char) info.AccelerationZ,
+        (unsigned char) info.CodeVersion,
+        (unsigned char) info.Controller,
+        (unsigned char) info.ConnectedActuatorCount,
+        (unsigned char) info.PositionType);
+}
+
+AngularInfo Jaco2::GetAngularPosition() {
+    AngularInfo angularPosition;
+    MyGetAngularCommand(currentAngularCommand);
+    angularPosition = currentAngularCommand.Actuators;
+}
+
+void Jaco2::ResetInstr() {
+    (*MyEraseAllTrajectories)();
+}
+
 void Jaco2::Home() {
     MyMoveHome();
 }
 
-void Jaco2::Move() {
+void Jaco2::SetFrameType(int type) {
+    int result;
+    result = (*MySetFrameType)(type);
+}
+
+void Jaco2::Move(CartesianDictionary position) {
     TrajectoryPoint pointToSend;
     pointToSend.InitStruct();
     //We specify that this point will be an angular(joint by joint) position.
     pointToSend.Position.Type = CARTESIAN_POSITION;
 
-    //We get the actual angular command of the robot.
+    //We get the actual command of the robot.
     MyGetCartesianCommand(currentCommand);
 
-    pointToSend.Position.CartesianPosition.X = currentCommand.Coordinates.X;
-    pointToSend.Position.CartesianPosition.Y = currentCommand.Coordinates.Y - 0.1f;
-    pointToSend.Position.CartesianPosition.Z = currentCommand.Coordinates.Z;
-    pointToSend.Position.CartesianPosition.ThetaX = currentCommand.Coordinates.ThetaX;
-    pointToSend.Position.CartesianPosition.ThetaY = currentCommand.Coordinates.ThetaY;
-    pointToSend.Position.CartesianPosition.ThetaZ = currentCommand.Coordinates.ThetaZ;
+    if (position.xset) {
+        pointToSend.Position.CartesianPosition.X = position.X;
+    } else {
+        pointToSend.Position.CartesianPosition.X = currentCommand.Coordinates.X;
+    }
+    if (position.yset) {
+        pointToSend.Position.CartesianPosition.Y = position.Y;
+    } else {
+        pointToSend.Position.CartesianPosition.Y = currentCommand.Coordinates.Y - 0.1f;
+    }
+    if (position.zset) {
+        pointToSend.Position.CartesianPosition.Z = position.Z;
+    } else {
+        pointToSend.Position.CartesianPosition.Z = currentCommand.Coordinates.Z;
+    }
+    if (position.thetaxset) {
+        pointToSend.Position.CartesianPosition.ThetaX = position.ThetaX;
+    } else {
+        pointToSend.Position.CartesianPosition.ThetaX = currentCommand.Coordinates.ThetaX;
+    }
+    if (position.thetayset) {
+        pointToSend.Position.CartesianPosition.ThetaY = position.ThetaY;
+    } else {
+        pointToSend.Position.CartesianPosition.ThetaY = currentCommand.Coordinates.ThetaY;
+    }
+    if (position.thetazset) {
+        pointToSend.Position.CartesianPosition.ThetaZ = position.ThetaZ;
+    } else {
+        pointToSend.Position.CartesianPosition.ThetaZ = currentCommand.Coordinates.ThetaZ;
+    }
 
-    cout << "*********************************" << endl;
-    cout << "Sending the first point to the robot." << endl;
     MySendBasicTrajectory(pointToSend);
-
-    pointToSend.Position.CartesianPosition.Z = currentCommand.Coordinates.Z + 0.1f;
-    cout << "Sending the second point to the robot." << endl;
-    MySendBasicTrajectory(pointToSend);
-
     cout << "*********************************" << endl << endl << endl;
 }
 
@@ -165,12 +235,15 @@ void Jaco2::MoveToPos(CartesianInfo position) {
     pointToSend.Position.CartesianPosition.ThetaX = position.ThetaX;
     pointToSend.Position.CartesianPosition.ThetaY = position.ThetaY;
     pointToSend.Position.CartesianPosition.ThetaZ = position.ThetaZ;
+    cout << "Sending trajectory" << endl;
     MySendBasicTrajectory(pointToSend);
-    cout << "*********************************" << endl << endl << endl;
+    cout << "." << endl;
 }
 
 void Jaco2::Disconnect() {
     int result;
+    cout << endl << "Stopping API" << endl;
+    (*MyStopControlAPI)();
     cout << endl << "C L O S I N G   A P I" << endl;
     result = (*MyCloseAPI)();
 	dlclose(commandLayer_handle);
@@ -180,12 +253,6 @@ void Jaco2::Disconnect() {
     myfile.open (log_save_location.c_str(), fstream::app);
     myfile << "------------------------------------------------------\n";
     myfile.close();
-}
-
-void Jaco2::InitPositionMode() {
-    log_msg(1, "Initializing position control mode...");
-    // TODO
-    log_msg(2, "Position control mode activated");
 }
 
 int Jaco2::log_msg(int type, string msg)
@@ -202,11 +269,3 @@ int Jaco2::log_msg(int type, string msg)
     myfile.close();
     return 0;
 }
-
-// int main() {
-//     Jaco2 *jaco;
-//     jaco = new Jaco2(0);
-//     jaco->Connect();
-
-//     return 0;
-// }

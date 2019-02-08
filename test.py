@@ -7,6 +7,9 @@ import time
 j = pyJaco2(0)
 j.Connect()
 # j.Move()
+j.Move(0.5)
+j.Disconnect()
+#%%
 print(j.GetPosition())
 # for i in range(10):
 #     position = j.GetPosition()
