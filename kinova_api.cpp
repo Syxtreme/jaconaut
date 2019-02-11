@@ -1,6 +1,12 @@
 #include "kinova_api.h"
 #include "Kinova.API.CommLayerUbuntu.h"
 #include "Kinova.API.UsbCommandLayerUbuntu.h"
+#include "KinovaTypes.h"
+#include <cmath>
+// #include <chrono>
+#include <time.h>
+
+using namespace std;
 
 const unsigned char Jaco2::CONTROL_MODE = 0x01;
 const unsigned char Jaco2::HAND_ADDRESS[3] = {0x16, 0x17, 0x18};
@@ -65,6 +71,8 @@ void Jaco2::Connect() {
     MyGetAngularCommand = (int(*)(AngularPosition &)) dlsym(commandLayer_handle, "GetAngularCommand");
     MyGetQuickStatus = (int (*)(QuickStatus &)) dlsym(commandLayer_handle,"GetQuickStatus");
     MyGetGeneralInformations = (int (*)(GeneralInformations &)) dlsym(commandLayer_handle,"GetGeneralInformations");
+    MySwitchTrajectoryTorque = (int(*)(GENERALCONTROL_TYPE)) dlsym(commandLayer_handle, "SwitchTrajectoryTorque");
+    MySetCartesianControl = (int (*)()) dlsym(commandLayer_handle,"SetCartesianControl");
 
 	if((MyInitAPI == NULL) || (MyCloseAPI == NULL) ||
 	   (MyGetQuickStatus == NULL) || (MySendBasicTrajectory == NULL) ||
@@ -92,14 +100,15 @@ void Jaco2::Connect() {
 
             //Setting the current device as the active device.
             MySetActiveDevice(list[i]);
-
-            cout << "Send the robot to HOME position" << endl;
-            MyMoveHome();
-
-            cout << "Initializing the fingers" << endl;
-            MyInitFingers();
+            MySwitchTrajectoryTorque(POSITION);
+            (*MySetCartesianControl)();
         }
     }
+}
+
+void Jaco2::InitFingers() {
+    cout << "Initializing the fingers" << endl;
+    MyInitFingers();
 }
 
 CartesianInfo Jaco2::GetPosition() {
@@ -164,6 +173,7 @@ AngularInfo Jaco2::GetAngularPosition() {
     AngularInfo angularPosition;
     MyGetAngularCommand(currentAngularCommand);
     angularPosition = currentAngularCommand.Actuators;
+    return angularPosition;
 }
 
 void Jaco2::ResetInstr() {
@@ -177,50 +187,119 @@ void Jaco2::Home() {
 void Jaco2::SetFrameType(int type) {
     int result;
     result = (*MySetFrameType)(type);
+    cout << "Disconnect result: " << result << endl;
 }
 
-void Jaco2::Move(CartesianDictionary position) {
+int Jaco2::Move(CartesianDictionary position, int maxWaitTime) {
     TrajectoryPoint pointToSend;
     pointToSend.InitStruct();
+    int result;
     //We specify that this point will be an angular(joint by joint) position.
     pointToSend.Position.Type = CARTESIAN_POSITION;
+
+    cout << ">>> ";
 
     //We get the actual command of the robot.
     MyGetCartesianCommand(currentCommand);
 
     if (position.xset) {
         pointToSend.Position.CartesianPosition.X = position.X;
+        // cout << "X: " << position.X << "; ";
     } else {
         pointToSend.Position.CartesianPosition.X = currentCommand.Coordinates.X;
     }
     if (position.yset) {
         pointToSend.Position.CartesianPosition.Y = position.Y;
+        // cout << "Y: " << position.Y << "; ";
     } else {
-        pointToSend.Position.CartesianPosition.Y = currentCommand.Coordinates.Y - 0.1f;
+        pointToSend.Position.CartesianPosition.Y = currentCommand.Coordinates.Y;
     }
     if (position.zset) {
         pointToSend.Position.CartesianPosition.Z = position.Z;
+        // cout << "Z: " << position.Z << "; ";
     } else {
         pointToSend.Position.CartesianPosition.Z = currentCommand.Coordinates.Z;
     }
     if (position.thetaxset) {
         pointToSend.Position.CartesianPosition.ThetaX = position.ThetaX;
+        // cout << "ThetaX: " << position.ThetaX << "; ";
     } else {
         pointToSend.Position.CartesianPosition.ThetaX = currentCommand.Coordinates.ThetaX;
     }
     if (position.thetayset) {
         pointToSend.Position.CartesianPosition.ThetaY = position.ThetaY;
+        // cout << "ThetaY: " << position.ThetaY << "; ";
     } else {
         pointToSend.Position.CartesianPosition.ThetaY = currentCommand.Coordinates.ThetaY;
     }
     if (position.thetazset) {
         pointToSend.Position.CartesianPosition.ThetaZ = position.ThetaZ;
+        // cout << "ThetaZ: " << position.ThetaZ << "; ";
     } else {
         pointToSend.Position.CartesianPosition.ThetaZ = currentCommand.Coordinates.ThetaZ;
     }
 
-    MySendBasicTrajectory(pointToSend);
-    cout << "*********************************" << endl << endl << endl;
+    cout << " >>>" << endl;
+    result = 0;
+    result = MySendBasicTrajectory(pointToSend);
+
+    float eps = 5e-3;
+    float staticEps = 1e-50;
+    float xdiff = INFINITY;
+    float ydiff = INFINITY;
+    float zdiff = INFINITY;
+    float thetaxdiff = INFINITY;
+    float thetaydiff = INFINITY;
+    float thetazdiff = INFINITY;
+
+    int sameCount = 100;
+    float lastx = 0;
+    float lasty = 0;
+    float lastz = 0;
+    float lastthetax = 0;
+    float lastthetay = 0;
+    float lastthetaz = 0;
+
+    double duration;
+    time_t end;
+    time_t start = time(NULL);
+    while(xdiff > eps || ydiff > eps || zdiff > eps || thetaxdiff > eps || thetaydiff > eps || thetazdiff > eps) {
+        MyGetCartesianCommand(currentCommand);
+        xdiff = abs(pointToSend.Position.CartesianPosition.X - currentCommand.Coordinates.X);
+        ydiff = abs(pointToSend.Position.CartesianPosition.Y - currentCommand.Coordinates.Y);
+        zdiff = abs(pointToSend.Position.CartesianPosition.Z - currentCommand.Coordinates.Z);
+        thetaxdiff = abs(pointToSend.Position.CartesianPosition.ThetaX - currentCommand.Coordinates.ThetaX);
+        thetaydiff = abs(pointToSend.Position.CartesianPosition.ThetaY - currentCommand.Coordinates.ThetaY);
+        thetazdiff = abs(pointToSend.Position.CartesianPosition.ThetaZ - currentCommand.Coordinates.ThetaZ);
+
+        if (abs(lastx - currentCommand.Coordinates.X) < staticEps &&
+            abs(lasty - currentCommand.Coordinates.Y) < staticEps &&
+            abs(lastz - currentCommand.Coordinates.Z) < staticEps &&
+            abs(lastthetax - currentCommand.Coordinates.ThetaX) < staticEps &&
+            abs(lastthetay - currentCommand.Coordinates.ThetaY) < staticEps &&
+            abs(lastthetaz - currentCommand.Coordinates.ThetaZ) < staticEps
+        ) {
+            sameCount--;
+            // cout << sameCount << endl;
+        }
+        lastx = currentCommand.Coordinates.X;
+        lasty = currentCommand.Coordinates.Y;
+        lastz = currentCommand.Coordinates.Z;
+        lastthetax = currentCommand.Coordinates.ThetaX;
+        lastthetay = currentCommand.Coordinates.ThetaY;
+        lastthetaz = currentCommand.Coordinates.ThetaZ;
+
+        end = time(NULL);
+        duration = end - start;
+        if (duration > maxWaitTime || sameCount < 0) {
+            cout << "< Fail! <" << endl;
+            return -1;
+        }
+    }
+
+    cout << "<<<" << endl;
+
+    return result;
 }
 
 void Jaco2::MoveToPos(CartesianInfo position) {
@@ -235,17 +314,23 @@ void Jaco2::MoveToPos(CartesianInfo position) {
     pointToSend.Position.CartesianPosition.ThetaX = position.ThetaX;
     pointToSend.Position.CartesianPosition.ThetaY = position.ThetaY;
     pointToSend.Position.CartesianPosition.ThetaZ = position.ThetaZ;
+
     cout << "Sending trajectory" << endl;
     MySendBasicTrajectory(pointToSend);
     cout << "." << endl;
 }
 
-void Jaco2::Disconnect() {
+void Jaco2::Disconnect(bool gotoHome) {
+    if (gotoHome) {
+        MyMoveHome();
+    }
+    
     int result;
     cout << endl << "Stopping API" << endl;
     (*MyStopControlAPI)();
     cout << endl << "C L O S I N G   A P I" << endl;
     result = (*MyCloseAPI)();
+    cout << "Disconnect result: " << result << endl;
 	dlclose(commandLayer_handle);
     log_msg(2, "Connection closed");
 

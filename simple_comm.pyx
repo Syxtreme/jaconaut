@@ -25,11 +25,13 @@ cdef extern from "kinova_api.h":
         void ResetInstr()
         void SetFrameType(int type)
 
+        void InitFingers()
+
         void Home()
         CartesianInfo GetPosition()
         AngularInfo GetAngularPosition()
 
-        void Move(CartesianDictionary position)
+        int Move(CartesianDictionary position, int maxWaitTime)
         void MoveToPos(CartesianInfo position)
 
         void PrintQuickStatus()
@@ -52,6 +54,109 @@ cdef extern from "KinovaTypes.h":
         float Actuator5
         float Actuator6
         float Actuator7
+
+cdef class pyCartesianDictionary():
+    cdef CartesianDictionary cartDict
+
+    def __cinit__(self, *args):
+        # self.cartDict = new CartesianDictionary()
+        pass
+
+    def reset(self):
+        del self.X
+        del self.Y
+        del self.Z
+        del self.ThetaX
+        del self.ThetaY
+        del self.ThetaZ
+
+    @property
+    def cartesianDictionary(self):
+        return self.cartDict
+        
+    @property
+    def X(self):
+        return self.cartDict.X
+
+    @X.setter
+    def X(self, value):
+        self.cartDict.X = value
+        self.cartDict.xset = True
+
+    @X.deleter
+    def X(self):
+        self.cartDict.xset = False
+
+    @property
+    def Y(self):
+        return self.cartDict.Y
+
+    @Y.setter
+    def Y(self, value):
+        self.cartDict.Y = value
+        self.cartDict.yset = True
+
+    @Y.deleter
+    def Y(self):
+        self.cartDict.yset = False
+
+    @property
+    def Z(self):
+        return self.cartDict.Z
+
+    @Z.setter
+    def Z(self, value):
+        self.cartDict.Z = value
+        self.cartDict.zset = True
+
+    @Z.deleter
+    def Z(self):
+        self.cartDict.zset = False
+
+    @property
+    def ThetaX(self):
+        return self.cartDict.ThetaX
+
+    @ThetaX.setter
+    def ThetaX(self, value):
+        self.cartDict.ThetaX = value
+        self.cartDict.thetaxset = True
+
+    @ThetaX.deleter
+    def ThetaX(self):
+        self.cartDict.thetaxset = False
+
+    @property
+    def ThetaY(self):
+        return self.cartDict.ThetaY
+
+    @ThetaY.setter
+    def ThetaY(self, value):
+        self.cartDict.ThetaY = value
+        self.cartDict.thetayset = True
+
+    @ThetaY.deleter
+    def ThetaY(self):
+        self.cartDict.thetayset = False
+
+    @property
+    def ThetaZ(self):
+        return self.cartDict.ThetaZ
+
+    @ThetaZ.setter
+    def ThetaZ(self, value):
+        self.cartDict.ThetaZ = value
+        self.cartDict.thetazset = True
+
+    @ThetaZ.deleter
+    def ThetaZ(self):
+        self.cartDict.thetazset = False
+
+    def __setitem__(self, item, value):
+        setattr(self, item, value)
+
+    def __getitem__(self, item):
+        getattr(self, item)
 
 
 cdef class pyJaco2:
@@ -78,8 +183,10 @@ cdef class pyJaco2:
     def GetPosition(self):
         return self.thisptr.GetPosition()
 
-    def Move(self, *args, **kwargs):
-        cpdef CartesianDictionary pos
+    def Move(self, *args, maxWaitTime = 10, **kwargs):
+        cpdef pyCartesianDictionary pos
+        pos = pyCartesianDictionary()
+        pos.reset()
         tempdict = {}
         for i, coord in enumerate(args):
             if i == 0:
@@ -98,14 +205,13 @@ cdef class pyJaco2:
         kwargs.update(tempdict)
 
         for k, v in kwargs.items():
-            print(type(pos))
-#            setattr(pos, "X", 1)
-#            setattr(pos, k, v)
-#            setattr(pos, ''.join([k.lower(), "set"]), True)
             pos[k] = v
-            pos[''.join([k.lower(), "set"])] = True
-            
-        self.thisptr.Move(pos)
+        
+        # print(pos.cartesianDictionary)
+        return self.thisptr.Move(pos.cartesianDictionary, maxWaitTime)
+
+    def InitFingers(self):
+        self.thisptr.InitFingers()
 
     def Home(self):
         self.thisptr.Home()

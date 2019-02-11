@@ -110,18 +110,23 @@ class Jaco2 {
         int (*MyGetAngularCommand)(AngularPosition &);
         int (*MyGetQuickStatus)(QuickStatus &Response);
         int (*MyGetGeneralInformations)(GeneralInformations &);
+        int (*MySwitchTrajectoryTorque)(GENERALCONTROL_TYPE);
+        int (*MySetCartesianControl)();
+        
 
         // main functions
         void Connect();
-        void Disconnect();
+        void Disconnect(bool = true);
         void ResetInstr();
         void SetFrameType(int type);
+
+        void InitFingers();
 
         void Home();
         CartesianInfo GetPosition();
         AngularInfo GetAngularPosition();
 
-        void Move(CartesianDictionary position);
+        int Move(CartesianDictionary position, int maxWaitTime = 20);
         void MoveToPos(CartesianInfo position);
 
         void PrintQuickStatus();
